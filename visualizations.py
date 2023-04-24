@@ -9,6 +9,8 @@ obtained from the US Energy Information Administration API.
 import requests
 import pandas as pd
 import json
+import matplotlib.pyplot as plt
+import numpy as np
 
 #SECTION 1: Methods retrieving data from EIA API
 """
@@ -43,7 +45,9 @@ def get_general_netgen_data(key):
     etc). Numbers cover all sectors and parts of the US. 
     """
     
-    url = f"https://api.eia.gov/v2/electricity/electric-power-operational-data/data/?api_key={key}&frequency=annual&data[0]=generation&facets[fueltypeid][]=BIO&facets[fueltypeid][]=COW&facets[fueltypeid][]=GEO&facets[fueltypeid][]=HYC&facets[fueltypeid][]=NG&facets[fueltypeid][]=NUC&facets[fueltypeid][]=PC&facets[fueltypeid][]=PEL&facets[fueltypeid][]=SUN&facets[fueltypeid][]=WND&facets[location][]=US&facets[sectorid][]=99&sort[0][column]=period&sort[0][direction]=desc&offset=0&length=5000&out=json"
+    print("Getting data from API...")
+
+    url = f"https://api.eia.gov/v2/electricity/electric-power-operational-data/data/?api_key={key}&frequency=annual&data[0]=generation&start=2009&end=2022&facets[fueltypeid][]=BIO&facets[fueltypeid][]=COW&facets[fueltypeid][]=GEO&facets[fueltypeid][]=HYC&facets[fueltypeid][]=NG&facets[fueltypeid][]=NUC&facets[fueltypeid][]=PC&facets[fueltypeid][]=PEL&facets[fueltypeid][]=SUN&facets[fueltypeid][]=WND&facets[location][]=US&facets[sectorid][]=99&sort[0][column]=period&sort[0][direction]=desc&offset=0&length=5000&out=json"
     response = requests.get(url).json()
     
     # dict of data is inside of another nested list 'response'
@@ -64,7 +68,9 @@ def get_netgen_by_sector(key):
     97 - all industrial
     """
 
-    url = f"https://api.eia.gov/v2/electricity/electric-power-operational-data/data/?api_key={key}&frequency=annual&data[0]=generation&start=2021&end=2022&facets[fueltypeid][]=BIO&facets[fueltypeid][]=COW&facets[fueltypeid][]=GEO&facets[fueltypeid][]=HYC&facets[fueltypeid][]=NG&facets[fueltypeid][]=NUC&facets[fueltypeid][]=PC&facets[fueltypeid][]=PEL&facets[fueltypeid][]=SUN&facets[fueltypeid][]=WND&facets[location][]=US&&facets[sectorid][]=1&facets[sectorid][]=94&facets[sectorid][]=96&facets[sectorid][]=97&sort[0][column]=period&sort[0][direction]=desc&offset=0&length=5000&out=json"
+    print('Getting data from API...')
+
+    url = f"https://api.eia.gov/v2/electricity/electric-power-operational-data/data/?api_key={key}&frequency=annual&data[0]=generation&start=2010&end=2022&facets[fueltypeid][]=BIO&facets[fueltypeid][]=COW&facets[fueltypeid][]=GEO&facets[fueltypeid][]=HYC&facets[fueltypeid][]=NG&facets[fueltypeid][]=NUC&facets[fueltypeid][]=PC&facets[fueltypeid][]=PEL&facets[fueltypeid][]=SUN&facets[fueltypeid][]=WND&facets[location][]=US&&facets[sectorid][]=1&facets[sectorid][]=94&facets[sectorid][]=96&facets[sectorid][]=97&sort[0][column]=period&sort[0][direction]=desc&offset=0&length=5000&out=json"
     response = requests.get(url).json()
 
     # dict of data is inside of another nested list 'response'
@@ -90,18 +96,24 @@ def get_netgen_by_state(key):
 
 def general_netgen_df(df):
     """
-    Generates a dataframe with years from 2001 to 2022 as the index and
-    fuel types as the columns and fills it with the respective generation
-    values from get_general_netgen_data. Returns a dataframe.
+    Generates a dataframe with fuel types as the index and years from 2001 to
+    2022 as the columns. Fills it with the respective generation values from
+    get_general_netgen_data. Returns a dataframe.
     """
+
+    print("Processing data...")
+
     fueltypes = df.fuelTypeDescription.unique()
-    new_df = pd.DataFrame(index = range(2001, 2022), columns = fueltypes)
+    new_df = pd.DataFrame(index = range(2010, 2022), columns = fueltypes)
     
     for year in new_df.index:
-        for col in new_df.columns:
-            val = df.loc[(df['period'] == year) & (df['fuelTypeDescription'] == col)] # subset df
-            val = val.set_index(['period']) # changes index to year so .loc can be used for next line
-            new_df.loc[year, col] = val.loc[year, 'generation'] # assign generation number to new df
+        for fuel in new_df.columns:
+            val = df.loc[(df['period'] == year) & (df['fuelTypeDescription'] == fuel)] # subset df
+            if len(val.index) > 0:
+                val = val.set_index(['period']) # changes index to year so .loc can be used for next line
+                new_df.loc[year, fuel] = val.loc[year, 'generation'] # assign generation number to new df
+            else:
+                continue
     return new_df
 
 def netgen_by_sector_df(df):
@@ -110,6 +122,9 @@ def netgen_by_sector_df(df):
     columns and fills it with the respective generation values from the raw
     dataframe from get_netgen_by_sector. Returns a dataframe.
     """
+
+    print('Processing data...')
+
     fueltypes = df.fuelTypeDescription.unique()
     sectors = df.sectorDescription.unique()
     new_df = pd.DataFrame(index=sectors, columns=fueltypes)
@@ -144,11 +159,89 @@ def netgen_by_state_df(df):
 SECTION 3: Generating visualizations using matplotlib
 """
 
-def general_netgen_viz(df):
+def general_netgen_viz(key):
+    """
+    Generates a stacked bar chart with year as the x axis and energy generation
+    in GWh as the y axis. The pieces of each stacked bar
+    represent sources of energy. 
+    
+    Argument df is a dataframe with years as the index and fuel types as the columns.
+    """
+
+    print("Starting figure 1...")
+    df = general_netgen_df(get_general_netgen_data(key))
+    print("Creating chart...")
+
+    # sorts df columns by their mean value
+    df = df.reindex(df.mean().sort_values().index, axis=1)
+
+    fig, ax = plt.subplots(1,1)
+    df.plot.bar(stacked=True, ax=ax, fontsize=10)
+
+    ax.xaxis.set_label_position('top') # puts title above exponent label
+    ax.set_title("Net electricity generation in the US from 2010-2022")
+    ax.set_xlabel("Year")
+    ax.set_ylabel('Net generation (GWh)', fontsize=12)
+
+    ax.legend(loc=2, bbox_to_anchor=(1.05, 1.0), fontsize=10)
+    # change with of ax to fit legend
+    pos = ax.get_position()
+    ax.set_position([pos.x0, pos.y0, pos.width * 1.0, pos.height])
+    fig.set_figwidth(8)
+    plt.tight_layout()
+    
+    print("Completed Figure 1: Net electricity generation in the US from 2010-2022\n")
+
+def netgen_by_sector_viz(key):
+    """
+    Generates a stacked bar chart with the sector as the x axis and the net
+    energy generation in thousand megawatthours as the y axis. The pieces of
+    each stacked bar represent the sources of energy.
+
+    Argument df is a dataframe with the sectors as the index values and fuel types as the columns. 
+    """
+
+    print('Starting Figure 2...')
+    df = netgen_by_sector_df(get_netgen_by_sector(key))
+    print('Creating chart...')
+
+    # sorts df columns by their mean value
+    df = df.reindex(df.mean().sort_values().index, axis=1)
+
+    fig, ax = plt.subplots(1,1)
+    df.plot.bar(stacked=True, ax=ax, fontsize=10)
+    
+    # put "Independent Power Producers" on separate lines
+    xt = list(df.index)
+    xt[2] = '\n'.join(xt[2].split())
+    # apply above changes and make the x labels horizontal
+    ax.set_xticklabels(xt, rotation=0)
+
+    ax.set_xlabel('Sector', fontsize=14)
+    ax.set_ylabel('Net generation (GWh)', fontsize=12)
+
+    ax.set_title("Net electricity generation by sector in 2022")
+    
+    ax.legend(loc=2, bbox_to_anchor=(1.05, 1.0), fontsize=10)
+    # change with of ax to fit legend
+    pos = ax.get_position()
+    ax.set_position([pos.x0, pos.y0, pos.width * 0.9, pos.height])
+    fig.set_figwidth(8)
+    plt.tight_layout()
+    
+    print('Completed Figure 2: Net electricity generation by sector in 2022')
+
+def netgen_by_state_viz(key):
+    """
+    
+    """
     pass
 
-def netgen_by_sector_viz(df):
-    pass
+def main():
+    """ Displays visualizations. """
+    key = "M75XbnCHbwIymVSeZUs2eVbnKlhd4EmWraupMZ5c"
+    general_netgen_viz(key)
+    netgen_by_sector_viz(key)
+    plt.show()
 
-def netgen_by_state_viz(df):
-    pass
+main()
