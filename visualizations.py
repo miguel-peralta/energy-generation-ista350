@@ -11,6 +11,7 @@ import pandas as pd
 import json
 import matplotlib.pyplot as plt
 import numpy as np
+import geopandas as gpd
 
 #SECTION 1: Methods retrieving data from EIA API
 """
@@ -84,6 +85,7 @@ def get_netgen_by_state(key):
     generation of electricity separated by generation method (solar, wind,
     etc.), and US state + District of Columbia.
     """
+    print("Getting data from API...")
     url = f"https://api.eia.gov/v2/electricity/electric-power-operational-data/data/?api_key={key}&frequency=annual&data[0]=generation&start=2021&end=2022&facets[fueltypeid][]=BIO&facets[fueltypeid][]=COW&facets[fueltypeid][]=GEO&facets[fueltypeid][]=HYC&facets[fueltypeid][]=NG&facets[fueltypeid][]=NUC&facets[fueltypeid][]=PC&facets[fueltypeid][]=PEL&facets[fueltypeid][]=SUN&facets[fueltypeid][]=WND&facets[location][]=AK&facets[location][]=AL&facets[location][]=AR&facets[location][]=AZ&facets[location][]=CA&facets[location][]=CO&facets[location][]=CT&facets[location][]=DC&facets[location][]=DE&facets[location][]=FL&facets[location][]=GA&facets[location][]=HI&facets[location][]=IA&facets[location][]=ID&facets[location][]=IL&facets[location][]=IN&facets[location][]=KS&facets[location][]=KY&facets[location][]=LA&facets[location][]=MA&facets[location][]=MD&facets[location][]=ME&facets[location][]=MI&facets[location][]=MN&facets[location][]=MO&facets[location][]=MS&facets[location][]=MT&facets[location][]=NC&facets[location][]=ND&facets[location][]=NE&facets[location][]=NH&facets[location][]=NJ&facets[location][]=NM&facets[location][]=NV&facets[location][]=NY&facets[location][]=OH&facets[location][]=OK&facets[location][]=OR&facets[location][]=PA&facets[location][]=RI&facets[location][]=SC&facets[location][]=SD&facets[location][]=TN&facets[location][]=TX&facets[location][]=UT&facets[location][]=VA&facets[location][]=VT&facets[location][]=WA&facets[location][]=WI&facets[location][]=WV&facets[location][]=WY&facets[sectorid][]=99&sort[0][column]=period&sort[0][direction]=desc&offset=0&length=5000&out=json"
     response = requests.get(url).json()
     
@@ -140,21 +142,30 @@ def netgen_by_sector_df(df):
 
 def netgen_by_state_df(df):
     """
-    Generates a dataframe with US states and DC as the index and fuel types as
-    the columns. Fills in the respective cells with the generation values from
-    the raw dataframe from get_netgen_by_state. Returns a dataframe. 
+    Generates a geopandas GeoDataFrame that contains the boundaries of all US
+    states read from a GeoJSON file, and fills in the dataframe with the energy 
+    generation data with the energy sources added as columns.
+    Returns a GeoDataFrame.
     """
+
+    print("Processing data...")
     fueltypes = df.fuelTypeDescription.unique()
-    states = df.location.unique()
-    new_df = pd.DataFrame(index = states, columns = fueltypes)
+    states = df.stateDescription.unique()
+
+    # creates geopandas GeoDataFrame from a GeoJSON file containing the
+    # boundaries of all US states
+    states_gdf = gpd.read_file("https://eric.clst.org/assets/wiki/uploads/Stuff/gz_2010_us_040_00_20m.json")
+    states_gdf = states_gdf.set_index(['NAME']) # make index state names
+    
     for fuel in fueltypes:
         for state in states:
-            for year in new_df.columns:
-                val = df.loc[(df['fuelTypeDescription'] == fuel) & (df['location'] == state)] # subset df
-                if len(val.index) > 0: # checks that there's a row in subset df
-                    val = val.set_index(['period']) # sets index to year so .loc can be used in next line
-                    new_df.loc[state, fuel] = val.loc[2022, 'generation']
-    return new_df
+            val = df.loc[(df['fuelTypeDescription'] == fuel) & (df['stateDescription'] == state)] # subset df
+            if len(val.index) > 0: # checks that there's a row in subset df
+                val = val.set_index(['period']) # sets index to year so .loc can be used in next line
+                states_gdf.loc[state, fuel] = val.loc[2022, 'generation']
+    states_gdf.drop(index='Puerto Rico') # don't have energy data for puerto rico
+    return states_gdf
+
 """
 SECTION 3: Generating visualizations using matplotlib
 """
@@ -233,9 +244,15 @@ def netgen_by_sector_viz(key):
 
 def netgen_by_state_viz(key):
     """
-    
+    Generates an interactive choropleth visualization of the net electricity
+    generation by state. Allows user to select the energy source to be
+    displayed. 
     """
-    pass
+    print("Starting Figure 3...")
+    gdf = netgen_by_state_df(get_netgen_by_state(key)) 
+    print("Creating chart...")
+
+
 
 def main():
     """ Displays visualizations. """
@@ -243,5 +260,4 @@ def main():
     general_netgen_viz(key)
     netgen_by_sector_viz(key)
     plt.show()
-
 main()
